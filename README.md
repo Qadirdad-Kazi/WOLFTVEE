@@ -46,8 +46,32 @@ Your Public IPTV site is the intended Live TV brand/host. WOLFTVEE already reads
 Even when you are signed in (profile avatar top-right, e.g. **im**):
 
 - Clicking the avatar / visiting account URLs does **not** show an API key or developer token.
-- There is **no** credits / purchase flow for an API token.
+- Sidebar **Credits** are for site tools (AI / Image Generator), **not** Live TV unlock.
 - Sign-in is free Google login for **user data** (favorites / playlists), not a paid unlock.
+
+### You don’t need a token to play streams
+
+When you open a channel and see **Choose Stream Source**, those `.m3u8` links are the playable feeds. Example (public, no login):
+
+- https://publiciptv.com/channels/abcus
+
+The page embeds stream objects like:
+
+```json
+{
+  "channel_id": "abcus",
+  "address": "https://….m3u8",
+  "status_code": "200",
+  "source": "iptvorg"
+}
+```
+
+So:
+
+1. **No API token** is required to get playable URLs from channel pages.
+2. Public IPTV’s stream `source` is **`iptvorg`** — the same open catalog WOLFTVEE already uses for Live TV.
+3. `GET /api/channels` is only the *bulk list* API (still 401 without a session). Playback does not depend on that token.
+4. The site’s “mixed content / insecure HTTP” notice is a **browser** warning. The Flutter player can use `http://` and `https://` HLS URLs directly.
 
 ### Quick links (bookmark these)
 
@@ -60,47 +84,41 @@ Even when you are signed in (profile avatar top-right, e.g. **im**):
 | Credits balance (after login) | https://publiciptv.com/user/credits |
 | My Channels | https://publiciptv.com/user/channels |
 | My Playlists | https://publiciptv.com/user/playlists |
+| Example channel + stream picker | https://publiciptv.com/channels/abcus |
 | Sports | https://publiciptv.com/sports |
 | Tools | https://publiciptv.com/tools |
 | Public categories API (no login) | https://publiciptv.com/api/categories |
 | Public countries API (no login) | https://publiciptv.com/api/countries |
-| Channel list API (**needs auth today → 401**) | https://publiciptv.com/api/channels |
+| Channel list API (**bulk list; auth → 401**) | https://publiciptv.com/api/channels |
 
-**Credits ≠ API token.** Sidebar **Credits** (balance `0` on Profile) are for site features such as AI / Image Generator — not a developer key for WOLFTVEE. Buying or holding credits does **not** produce `PUBLIC_IPTV_TOKEN`.
+**Credits ≠ API token.** Buying or holding credits does **not** produce `PUBLIC_IPTV_TOKEN`.
 
-### How auth works right now
+### Optional bulk-list auth (only if you want `/api/channels`)
 
 1. Open [Sign in](https://publiciptv.com/auth/signin) and complete Google login.
-2. Browse channels on [publiciptv.com](https://publiciptv.com/) (free; no credits).
-3. In the browser, open DevTools → **Network** → reload → call  
+2. In the browser, DevTools → **Network** → open  
    [https://publiciptv.com/api/channels](https://publiciptv.com/api/channels)  
-   While logged in, that request may succeed via a **session cookie** (`next-auth` / similar).  
-   That cookie is **not** a stable app API key you paste into `.env`.
+   A logged-in **session cookie** may unlock that bulk list. That cookie is **not** a stable app API key.
 
 ### What to put in WOLFTVEE `.env`
 
 ```bash
 PUBLIC_IPTV_BASE_URL=https://publiciptv.com
-PUBLIC_IPTV_TOKEN=          # leave empty until you create a real API key
+PUBLIC_IPTV_TOKEN=          # leave empty — not required for Live TV playback
+IPTV_ORG_API_BASE=https://iptv-org.github.io/api
 ```
 
-When you (as site owner) add a real server API key, set:
+Live TV already works without `PUBLIC_IPTV_TOKEN` because it uses the same **iptvorg** stream catalog your channel pages show.
 
-```bash
-PUBLIC_IPTV_TOKEN=your_bearer_token_here
-```
+### Owner checklist (only if you want the app to call your host’s bulk API)
 
-The app sends: `Authorization: Bearer <PUBLIC_IPTV_TOKEN>` to `GET /api/channels`.
+Do **one** of these on the Public IPTV backend:
 
-### Owner checklist (unlock Public IPTV for the app)
+1. Make [`GET /api/channels`](https://publiciptv.com/api/channels) public, **or**
+2. Add `/api/public/channels`, **or**
+3. Add a Bearer API key + a Settings page that shows the token (then set `PUBLIC_IPTV_TOKEN`).
 
-Do **one** of these on the Public IPTV backend, then Live TV can use your host only:
-
-1. Make [`GET /api/channels`](https://publiciptv.com/api/channels) public (remove the login check), **or**
-2. Add a public route like `/api/public/channels`, **or**
-3. Add an API-key / Bearer check and expose a **Settings → API token** page (link it here when it exists).
-
-Until then, the app keeps the full playable catalog from iptv-org so Live TV is not empty.
+Until then, leave the token empty — channel playback in WOLFTVEE does not need it.
 
 ## Elo endpoints
 
