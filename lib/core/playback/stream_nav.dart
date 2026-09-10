@@ -1,0 +1,111 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../app.dart';
+import '../../data/models/media_item.dart';
+import '../../core/theme/wolf_colors.dart';
+
+/// Opens the licensed stream player for a movie or series title.
+///
+/// Prefers direct HLS (m3u8) via media_kit; otherwise iframe WebView.
+Future<void> openStreamPlayer(
+  BuildContext context, {
+  required String title,
+  required MediaKind kind,
+  required int mediaId,
+  List<PlaySource> players = const [],
+  int season = 1,
+  int episode = 1,
+  int? year,
+}) async {
+  var list = players;
+  if (list.isEmpty && context.mounted) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: WolfColors.voidBlack.withValues(alpha: 0.72),
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: WolfColors.lime),
+      ),
+    );
+    try {
+      final detail = await AppScope.repoOf(context).detail(kind, mediaId);
+      list = detail.players;
+    } catch (e) {
+      debugPrint('openStreamPlayer resolve failed: $e');
+    }
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+  if (!context.mounted) return;
+
+  final playable = list.isEmpty
+      ? const <PlaySource>[]
+      : [
+          ...list.where((p) => p.isHls),
+          ...list.where((p) => !p.isHls),
+        ];
+
+  if (playable.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: WolfColors.steel,
+        content: Text(
+          'No licensed stream for this title yet (discovery-only).',
+          style: TextStyle(color: WolfColors.bone),
+        ),
+      ),
+    );
+    return;
+  }
+
+  final first = playable.first;
+  final useWebView = !first.isHls;
+
+  context.push('/stream', extra: {
+    'title': title,
+    'url': first.url,
+    'mode': 'vod',
+    'provider': 'elo',
+    'kind': kind.name,
+    'mediaId': '$mediaId',
+    'mediaIdInt': mediaId,
+    'season': season,
+    'episode': episode,
+    'year': year,
+    'webview': useWebView,
+    'referrer': Uri.tryParse(first.url)?.origin,
+    'sources': [
+      for (final s in playable) s.toLiveSource().toJson(),
+    ],
+    'sourceIndex': 0,
+  });
+}
+
+/// Opens live TV with optional alternate quality / server sources.
+void openLiveStreamPlayer(
+  BuildContext context, {
+  required LiveChannel channel,
+}) {
+  final sources = channel.selectableSources;
+  final primary = sources.isNotEmpty
+      ? sources.first
+      : LiveStreamSource(
+          url: channel.streamUrl ?? '',
+          quality: channel.quality,
+          userAgent: channel.userAgent,
+          referrer: channel.referrer,
+        );
+
+  context.push('/stream', extra: {
+    'title': channel.name,
+    'url': primary.url,
+    'mode': 'live',
+    'provider': 'live',
+    'userAgent': primary.userAgent ?? channel.userAgent,
+    'referrer': primary.referrer ?? channel.referrer,
+    'sources': [for (final s in sources) s.toJson()],
+    'sourceIndex': 0,
+  });
+}
