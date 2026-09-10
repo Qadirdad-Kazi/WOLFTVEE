@@ -18,6 +18,9 @@ class EloApiService {
 
   bool forceRefresh = false;
 
+  /// In-flight GET coalescing — identical URLs share one network call.
+  final Map<String, Future<dynamic>> _inflight = {};
+
   static const _ua = 'WOLFTVEE/1.0';
 
   Future<List<LiveChannel>> liveBroadcasts({bool forceRefresh = false}) async {
@@ -62,14 +65,20 @@ class EloApiService {
     return out;
   }
 
-  Future<List<MediaItem>> hollywood({int page = 1}) =>
-      _catalogList('catalog/hollywood', 'elo:hw_p$page', page: page);
+  /// Full Hollywood catalog (all pages). Pass [page] for a single page only.
+  Future<List<MediaItem>> hollywood({int? page}) => page != null
+      ? _catalogPage('catalog/hollywood', 'elo:hw', page: page)
+      : _catalogAll('catalog/hollywood', 'elo:hw');
 
-  Future<List<MediaItem>> bollywood({int page = 1}) =>
-      _catalogList('catalog/bollywood', 'elo:bw_p$page', page: page);
+  /// Full Bollywood catalog (all pages). Pass [page] for a single page only.
+  Future<List<MediaItem>> bollywood({int? page}) => page != null
+      ? _catalogPage('catalog/bollywood', 'elo:bw', page: page)
+      : _catalogAll('catalog/bollywood', 'elo:bw');
 
-  Future<List<MediaItem>> serials({int page = 1}) =>
-      _catalogList('catalog/serials', 'elo:ser_p$page', page: page);
+  /// Full serials catalog (all pages). Pass [page] for a single page only.
+  Future<List<MediaItem>> serials({int? page}) => page != null
+      ? _catalogPage('catalog/serials', 'elo:ser', page: page)
+      : _catalogAll('catalog/serials', 'elo:ser');
 
   Future<List<CatalogRail>> homeRails({bool forceRefresh = false}) async {
     final raw = await _getJson(
@@ -92,7 +101,8 @@ class EloApiService {
       final items = <MediaItem>[];
       for (final m in movies) {
         if (m is Map) {
-          items.add(MediaItem.fromElo(Map<String, dynamic>.from(m)));
+          final item = MediaItem.fromElo(Map<String, dynamic>.from(m));
+          if (item.hasPlayableSource) items.add(item);
         }
       }
       if (items.isEmpty) continue;
@@ -102,22 +112,80 @@ class EloApiService {
     return rails;
   }
 
-  Future<List<MediaItem>> _catalogList(
+  Future<List<MediaItem>> _catalogPage(
     String path,
-    String cacheKey, {
-    int page = 1,
+    String cachePrefix, {
+    required int page,
   }) async {
     final raw = await _getJson(
       path,
-      cacheKey,
+      '${cachePrefix}_p$page',
       query: {'page': '$page'},
       force: forceRefresh,
     );
+    return _itemsFromResults(raw);
+  }
+
+  /// Fetches every catalog page (API returns 20/page + pagination.pages).
+  Future<List<MediaItem>> _catalogAll(String path, String cachePrefix) async {
+    final firstRaw = await _getJson(
+      path,
+      '${cachePrefix}_p1',
+      query: const {'page': '1'},
+      force: forceRefresh,
+    );
+    final first = _itemsFromResults(firstRaw);
+    final totalPages = _totalPages(firstRaw);
+    if (totalPages <= 1) {
+      debugPrint('EloApiService $path: ${first.length} items (1 page)');
+      return first;
+    }
+
+    final byPage = <int, List<MediaItem>>{1: first};
+    // Parallel batches keep load reasonable (~78 pages across catalogs).
+    const batchSize = 6;
+    for (var start = 2; start <= totalPages; start += batchSize) {
+      final end =
+          start + batchSize - 1 > totalPages ? totalPages : start + batchSize - 1;
+      final futures = <Future<void>>[];
+      for (var page = start; page <= end; page++) {
+        final p = page;
+        futures.add(() async {
+          byPage[p] = await _catalogPage(path, cachePrefix, page: p);
+        }());
+      }
+      await Future.wait(futures);
+    }
+
+    final out = <MediaItem>[];
+    final seen = <int>{};
+    for (var page = 1; page <= totalPages; page++) {
+      for (final item in byPage[page] ?? const <MediaItem>[]) {
+        if (seen.add(item.id)) out.add(item);
+      }
+    }
+    debugPrint(
+      'EloApiService $path: ${out.length} items ($totalPages pages)',
+    );
+    return out;
+  }
+
+  List<MediaItem> _itemsFromResults(dynamic raw) {
     final list = _results(raw);
     return [
       for (final item in list)
-        if (item is Map) MediaItem.fromElo(Map<String, dynamic>.from(item)),
-    ];
+        if (item is Map)
+          MediaItem.fromElo(Map<String, dynamic>.from(item)),
+    ].where((m) => m.hasPlayableSource).toList();
+  }
+
+  int _totalPages(dynamic raw) {
+    if (raw is! Map) return 1;
+    final pagination = raw['pagination'];
+    if (pagination is! Map) return 1;
+    final pages = pagination['pages'];
+    if (pages is int && pages > 0) return pages;
+    return int.tryParse('$pages') ?? 1;
   }
 
   Future<MediaDetail?> detailById(int id) async {
@@ -187,6 +255,23 @@ class EloApiService {
       if (hit != null && hit['payload'] != null) return hit['payload'];
     }
 
+    final existing = _inflight[key];
+    if (existing != null) return existing;
+
+    final future = _fetchAndCache(path, key, query: query);
+    _inflight[key] = future;
+    try {
+      return await future;
+    } finally {
+      _inflight.remove(key);
+    }
+  }
+
+  Future<dynamic> _fetchAndCache(
+    String path,
+    String key, {
+    Map<String, String>? query,
+  }) async {
     final uri = Uri.parse('${Env.apiBaseUrl}/$path').replace(
       queryParameters: query,
     );

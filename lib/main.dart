@@ -16,6 +16,8 @@ import 'data/repositories/media_repository.dart';
 import 'data/services/cache_store.dart';
 import 'data/services/elo_api_service.dart';
 import 'data/services/favorites_store.dart';
+import 'data/services/iptv_org_service.dart';
+import 'data/services/public_iptv_service.dart';
 import 'data/services/settings_store.dart';
 import 'data/services/trakt_service.dart';
 import 'data/services/tmdb_service.dart';
@@ -58,9 +60,17 @@ Future<void> main() async {
   await cache.init();
 
   final elo = EloApiService(cache: cache);
+  final iptv = IptvOrgService(cache: cache);
+  final publicIptv = PublicIptvService(cache: cache);
   final tmdb = TmdbService(cache: cache);
   final trakt = TraktService(tmdb: tmdb, cache: cache);
-  final repo = MediaRepository(elo: elo, tmdb: tmdb, trakt: trakt);
+  final repo = MediaRepository(
+    elo: elo,
+    iptv: iptv,
+    publicIptv: publicIptv,
+    tmdb: tmdb,
+    trakt: trakt,
+  );
   final catalog = CatalogController(repo, elo, tmdb: tmdb, trakt: trakt);
 
   runApp(

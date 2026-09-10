@@ -1,13 +1,14 @@
 import '../models/media_item.dart';
 
-/// Merge Elo (playable primary) with Trakt/TMDB discovery (gap-fill).
+/// Merge Elo (playable primary) with Trakt/TMDB metadata for matching titles.
 ///
 /// Rules:
 /// 1. Match by normalized title + year + kind (Elo has no TMDB id).
 /// 2. On match → keep Elo players; prefer newer Elo `createdAt`; enrich poster
 ///    from TMDB when Elo poster is empty.
-/// 3. Elo-only and TMDB-only titles are both kept (no drop of unique titles).
-/// 4. Sort merged rails with newest Elo uploads first, then discovery.
+/// 3. Unique secondary (discovery-only) titles may appear in the merge list;
+///    callers must filter with [MediaItem.hasPlayableSource] before showing UI.
+/// 4. Sort with playable Elo first, then by recency.
 abstract final class CatalogMerge {
   static String fingerprint(MediaItem item) {
     final title = item.title

@@ -19,6 +19,30 @@ abstract final class Env {
     return 'https://mapi.elochkaigolochla.com/api/v1';
   }
 
+  /// Global live IPTV catalog (iptv-org open API — channels + streams).
+  static String get iptvOrgApiBase {
+    final v = dotenv.env['IPTV_ORG_API_BASE']?.trim();
+    if (v != null && v.isNotEmpty) {
+      return v.endsWith('/') ? v.substring(0, v.length - 1) : v;
+    }
+    return 'https://iptv-org.github.io/api';
+  }
+
+  /// Optional Public IPTV host (categories / future authenticated channel list).
+  static String get publicIptvBaseUrl {
+    final v = dotenv.env['PUBLIC_IPTV_BASE_URL']?.trim();
+    if (v != null && v.isNotEmpty) {
+      return v.endsWith('/') ? v.substring(0, v.length - 1) : v;
+    }
+    return 'https://publiciptv.com';
+  }
+
+  /// Optional bearer / session token for Public IPTV `/api/channels`.
+  static String get publicIptvToken =>
+      dotenv.env['PUBLIC_IPTV_TOKEN']?.trim() ?? '';
+
+  static bool get hasPublicIptvToken => publicIptvToken.isNotEmpty;
+
   static String get imageCdn {
     final v = dotenv.env['IMG_CDN']?.trim();
     if (v != null && v.isNotEmpty) {

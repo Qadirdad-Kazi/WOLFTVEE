@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
@@ -25,6 +26,8 @@ class _LiveScreenState extends State<LiveScreen> {
   int _selectedCountry = 0;
   bool _loading = true;
   String? _error;
+  String _query = '';
+  final _searchCtrl = TextEditingController();
 
   bool _booted = false;
 
@@ -34,6 +37,12 @@ class _LiveScreenState extends State<LiveScreen> {
     if (_booted) return;
     _booted = true;
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
@@ -48,7 +57,11 @@ class _LiveScreenState extends State<LiveScreen> {
       final cats = {
         for (final c in channels) c.category,
       }.toList()
-        ..sort();
+        ..sort((a, b) {
+          if (a.toLowerCase() == 'sports') return -1;
+          if (b.toLowerCase() == 'sports') return 1;
+          return a.compareTo(b);
+        });
       final countries = {
         for (final c in channels)
           if (c.countryName != null && c.countryName!.isNotEmpty) c.countryName!,
@@ -84,7 +97,24 @@ class _LiveScreenState extends State<LiveScreen> {
       final country = _countries[_selectedCountry];
       list = list.where((c) => c.countryName == country);
     }
+    final q = _query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list.where((c) {
+        return c.name.toLowerCase().contains(q) ||
+            c.category.toLowerCase().contains(q) ||
+            (c.countryName?.toLowerCase().contains(q) ?? false) ||
+            (c.countryCode?.toLowerCase().contains(q) ?? false);
+      });
+    }
     return list.toList();
+  }
+
+  List<LiveChannel> get _sportsPreview {
+    final sports = _all
+        .where((c) => c.category.toLowerCase() == 'sports')
+        .take(24)
+        .toList();
+    return sports;
   }
 
   Future<void> _openChannel(LiveChannel channel) async {
@@ -101,30 +131,53 @@ class _LiveScreenState extends State<LiveScreen> {
       );
       return;
     }
-    // In-app only — no external browser.
     openLiveStreamPlayer(context, channel: channel);
   }
 
   @override
   Widget build(BuildContext context) {
+    final sportsCount =
+        _all.where((c) => c.category.toLowerCase() == 'sports').length;
     return Scaffold(
       appBar: WolfTopBar(
         title: 'LIVE TV',
         actions: [
+          if (!_loading && _all.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Center(
+                child: Text(
+                  '${_all.length}',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: WolfColors.lime,
+                      ),
+                ),
+              ),
+            ),
           IconButton(
             onPressed: _loading ? null : () => _load(forceRefresh: true),
             icon: const Icon(Icons.refresh, color: WolfColors.lime),
           ),
         ],
       ),
-      body: _buildBody(),
+      body: _buildBody(sportsCount),
     );
   }
 
-  Widget _buildBody() {
+  Widget _buildBody(int sportsCount) {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(color: WolfColors.lime),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: WolfColors.lime),
+            SizedBox(height: 16),
+            Text(
+              'Loading live channels…',
+              style: TextStyle(color: WolfColors.mist),
+            ),
+          ],
+        ),
       );
     }
 
@@ -148,8 +201,38 @@ class _LiveScreenState extends State<LiveScreen> {
     }
 
     final items = _filtered;
+    final showSportsRail =
+        _selectedCat == 0 && _query.isEmpty && _sportsPreview.isNotEmpty;
+
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
+            style: const TextStyle(color: WolfColors.bone),
+            cursorColor: WolfColors.lime,
+            decoration: InputDecoration(
+              hintText: 'Search channels, sports, countries…',
+              hintStyle: const TextStyle(color: WolfColors.mist),
+              prefixIcon: const Icon(Icons.search, color: WolfColors.mist),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _query = '');
+                      },
+                      icon: const Icon(Icons.close, color: WolfColors.mist),
+                    ),
+              filled: true,
+              fillColor: WolfColors.slate,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
         CategoryBar(
           labels: _cats,
           selected: _selectedCat,
@@ -162,7 +245,7 @@ class _LiveScreenState extends State<LiveScreen> {
             onSelect: (i) => setState(() => _selectedCountry = i),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
           child: Row(
             children: [
               const Expanded(child: ScanLine(height: 2)),
@@ -171,8 +254,25 @@ class _LiveScreenState extends State<LiveScreen> {
                 '${items.length} CH',
                 style: Theme.of(context).textTheme.labelMedium,
               ),
+              if (sportsCount > 0) ...[
+                const SizedBox(width: 10),
+                Text(
+                  '· $sportsCount SPORTS',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: WolfColors.ember,
+                      ),
+                ),
+              ],
             ],
           ),
+        ),
+        if (showSportsRail) _SportsRail(
+          channels: _sportsPreview,
+          onOpen: _openChannel,
+          onSeeAll: () {
+            final i = _cats.indexWhere((c) => c.toLowerCase() == 'sports');
+            if (i >= 0) setState(() => _selectedCat = i);
+          },
         ),
         Expanded(
           child: items.isEmpty
@@ -183,11 +283,10 @@ class _LiveScreenState extends State<LiveScreen> {
                   ),
                 )
               : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 2,
-                    childAspectRatio: 1.35,
+                    childAspectRatio: 1.28,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                   ),
@@ -199,11 +298,119 @@ class _LiveScreenState extends State<LiveScreen> {
                       index: i,
                       onTap: () => _openChannel(ch),
                     )
-                        .animate(delay: (40 * (i % 24)).ms)
+                        .animate(delay: (30 * (i % 20)).ms)
                         .fadeIn()
-                        .slideY(begin: 0.08);
+                        .slideY(begin: 0.06);
                   },
                 ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SportsRail extends StatelessWidget {
+  const _SportsRail({
+    required this.channels,
+    required this.onOpen,
+    required this.onSeeAll,
+  });
+
+  final List<LiveChannel> channels;
+  final ValueChanged<LiveChannel> onOpen;
+  final VoidCallback onSeeAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 12, 8),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                color: WolfColors.ember,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'SPORTS',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: WolfColors.ember,
+                      letterSpacing: 1.2,
+                    ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: onSeeAll,
+                child: const Text(
+                  'SEE ALL',
+                  style: TextStyle(color: WolfColors.lime, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 88,
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            scrollDirection: Axis.horizontal,
+            itemCount: channels.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final ch = channels[i];
+              return WolfTvFocusable(
+                onActivate: () => onOpen(ch),
+                child: Material(
+                  color: WolfColors.slate,
+                  child: InkWell(
+                    onTap: () => onOpen(ch),
+                    child: Container(
+                      width: 168,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: WolfColors.steel),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          _ChannelLogo(url: ch.logoUrl, size: 40),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  ch.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                                if (ch.countryCode != null)
+                                  Text(
+                                    ch.countryCode!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(color: WolfColors.mist),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
         ),
       ],
     );
@@ -270,6 +477,7 @@ class _LiveTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isSports = channel.category.toLowerCase() == 'sports';
     return WolfTvFocusable(
       onActivate: onTap,
       child: Material(
@@ -278,32 +486,68 @@ class _LiveTile extends StatelessWidget {
           onTap: onTap,
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: WolfColors.steel),
+              border: Border.all(
+                color: isSports ? WolfColors.ember.withValues(alpha: 0.55) : WolfColors.steel,
+              ),
             ),
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      color: channel.isLive ? WolfColors.ember : WolfColors.mist,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      channel.isLive ? 'ON AIR' : 'OFF',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: channel.isLive
-                                ? WolfColors.ember
-                                : WolfColors.mist,
+                    _ChannelLogo(url: channel.logoUrl, size: 36),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                color: channel.isLive
+                                    ? WolfColors.ember
+                                    : WolfColors.mist,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                channel.isLive ? 'LIVE' : 'OFF',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: channel.isLive
+                                          ? WolfColors.ember
+                                          : WolfColors.mist,
+                                    ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                channel.category.toUpperCase(),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: isSports
+                                          ? WolfColors.ember
+                                          : WolfColors.mist,
+                                    ),
+                              ),
+                            ],
                           ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      channel.category.toUpperCase(),
-                      style: Theme.of(context).textTheme.labelMedium,
+                          if (channel.quality != null &&
+                              channel.quality!.isNotEmpty)
+                            Text(
+                              channel.quality!,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(color: WolfColors.lime),
+                            ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -312,19 +556,56 @@ class _LiveTile extends StatelessWidget {
                   channel.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
                 Text(
                   channel.subtitle ??
-                      'CH ${(index + 1).toString().padLeft(2, '0')}',
+                      'CH ${(index + 1).toString().padLeft(3, '0')}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: WolfColors.mist,
+                      ),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChannelLogo extends StatelessWidget {
+  const _ChannelLogo({required this.url, this.size = 36});
+
+  final String? url;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = Border.all(color: WolfColors.steel);
+    if (url == null || url!.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(color: WolfColors.voidBlack, border: border),
+        child: const Icon(Icons.live_tv, color: WolfColors.mist, size: 18),
+      );
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(border: border),
+      clipBehavior: Clip.hardEdge,
+      child: CachedNetworkImage(
+        imageUrl: url!,
+        fit: BoxFit.contain,
+        placeholder: (_, _) => Container(color: WolfColors.voidBlack),
+        errorWidget: (_, _, _) => Container(
+          color: WolfColors.voidBlack,
+          child: const Icon(Icons.live_tv, color: WolfColors.mist, size: 18),
         ),
       ),
     );

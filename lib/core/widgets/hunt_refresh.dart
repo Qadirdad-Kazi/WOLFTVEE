@@ -5,6 +5,7 @@ import '../motion/wolf_motion.dart';
 import '../theme/wolf_colors.dart';
 import 'scan_line.dart';
 import 'tv_focusable.dart';
+import 'wolf_brand.dart';
 
 /// Lime hunt-sweep overlay — one full wipe, then content swaps live.
 class HuntSweepOverlay extends StatefulWidget {
@@ -106,6 +107,8 @@ class _HuntSweepOverlayState extends State<HuntSweepOverlay>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      const WolfLogoMark(size: 72, radius: 12),
+                      const SizedBox(height: 16),
                       Text(
                         'WOLFTVEE',
                         style: Theme.of(context).textTheme.displaySmall,

@@ -526,4 +526,48 @@ class LiveChannel {
       ),
     ];
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'category': category,
+        if (streamUrl != null) 'streamUrl': streamUrl,
+        if (logoUrl != null) 'logoUrl': logoUrl,
+        'isLive': isLive,
+        if (quality != null) 'quality': quality,
+        if (userAgent != null) 'userAgent': userAgent,
+        if (referrer != null) 'referrer': referrer,
+        if (subtitle != null) 'subtitle': subtitle,
+        if (countryCode != null) 'countryCode': countryCode,
+        if (countryName != null) 'countryName': countryName,
+        'sources': [for (final s in sources) s.toJson()],
+      };
+
+  factory LiveChannel.fromJson(Map<String, dynamic> json) {
+    final rawSources = json['sources'];
+    final sources = <LiveStreamSource>[];
+    if (rawSources is List) {
+      for (final s in rawSources) {
+        if (s is Map) {
+          final src = LiveStreamSource.fromJson(Map<String, dynamic>.from(s));
+          if (src.url.isNotEmpty) sources.add(src);
+        }
+      }
+    }
+    return LiveChannel(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? 'Channel').toString(),
+      category: (json['category'] ?? 'Other').toString(),
+      streamUrl: json['streamUrl']?.toString(),
+      logoUrl: json['logoUrl']?.toString(),
+      isLive: json['isLive'] != false,
+      quality: json['quality']?.toString(),
+      userAgent: json['userAgent']?.toString(),
+      referrer: json['referrer']?.toString(),
+      subtitle: json['subtitle']?.toString(),
+      countryCode: json['countryCode']?.toString(),
+      countryName: json['countryName']?.toString(),
+      sources: sources,
+    );
+  }
 }

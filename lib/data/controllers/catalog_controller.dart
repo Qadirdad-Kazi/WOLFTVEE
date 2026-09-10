@@ -86,12 +86,11 @@ class CatalogController extends ChangeNotifier {
   }
 
   Future<void> _loadAll() async {
+    // One catalog pass only — shelves come from loadHome (no re-fetch).
     final home = await _repo.loadHome();
-    final m = await _repo.moviesShelf();
-    final s = await _repo.seriesShelf();
     catalog = home;
-    movies = m;
-    series = s;
+    movies = home.movies;
+    series = home.series;
     movieGenres = home.movieGenres;
     tvGenres = home.tvGenres;
     lastUpdated = DateTime.now();
@@ -99,12 +98,13 @@ class CatalogController extends ChangeNotifier {
 
   Future<List<MediaItem>> moviesByGenre(int genreId) async {
     if (genreId < 0) return movies;
-    return _repo.byGenre(MediaKind.movie, genreId);
+    // Filter in-memory — do not hit the network again.
+    return movies.where((m) => m.genreIds.contains(genreId)).toList();
   }
 
   Future<List<MediaItem>> seriesByGenre(int genreId) async {
     if (genreId < 0) return series;
-    return _repo.byGenre(MediaKind.tv, genreId);
+    return series.where((m) => m.genreIds.contains(genreId)).toList();
   }
 
   Future<void> clearCache() => _elo.clearCache();
@@ -112,6 +112,7 @@ class CatalogController extends ChangeNotifier {
   Future<CacheStats> cacheStats() => _elo.cacheStats();
 
   void updateCacheTtl(Duration ttl) {
+    // Elo / TMDB / Trakt share the same CacheStore instance from main.dart.
     _elo.updateCacheTtl(ttl);
   }
 }

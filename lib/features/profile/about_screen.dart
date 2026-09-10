@@ -25,8 +25,9 @@ class AboutScreen extends StatelessWidget {
           Text(
             'WOLFTVEE is a flat, intense Flutter catalog for films, series, '
             'and live TV. Discovery merges Elo playable catalogs with Trakt/TMDB. '
-            'Playback and continue watching run in-app. Favorites and '
-            'recommendations live on title pages.',
+            'Live TV pulls the global IPTV directory (sports-first) plus optional '
+            'Public IPTV and Elo broadcasts. Playback and continue watching run '
+            'in-app.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
@@ -35,6 +36,7 @@ class AboutScreen extends StatelessWidget {
           _AboutRow(label: 'Version', value: '1.0.0'),
           _AboutRow(label: 'Engine', value: 'Flutter'),
           _AboutRow(label: 'Catalog', value: 'Elo + Trakt/TMDB'),
+          _AboutRow(label: 'Live TV', value: 'IPTV + Elo'),
           _AboutRow(label: 'Player', value: 'WOLFTVEE'),
           const SizedBox(height: 24),
           const Center(child: WolfLogoMark(size: 96, radius: 14)),
