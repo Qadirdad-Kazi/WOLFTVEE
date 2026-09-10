@@ -20,7 +20,7 @@ class IptvOrgService {
   final http.Client _client;
 
   static const _ua = 'WOLFTVEE/1.0';
-  static const _cacheKey = 'iptv_org:live_v2';
+  static const _cacheKey = 'iptv_org:live_v3';
 
   /// All playable live channels (NSFW excluded). Sports sorted first.
   Future<List<LiveChannel>> liveChannels({bool forceRefresh = false}) async {
@@ -273,6 +273,9 @@ int _compareStreams(_RawStream a, _RawStream b) {
   final aq = _qualityRank(a.quality);
   final bq = _qualityRank(b.quality);
   if (aq != bq) return bq.compareTo(aq);
+  final aHttps = a.url.startsWith('https://') ? 1 : 0;
+  final bHttps = b.url.startsWith('https://') ? 1 : 0;
+  if (aHttps != bHttps) return bHttps.compareTo(aHttps);
   final ah = a.url.contains('.m3u8') ? 1 : 0;
   final bh = b.url.contains('.m3u8') ? 1 : 0;
   return bh.compareTo(ah);
