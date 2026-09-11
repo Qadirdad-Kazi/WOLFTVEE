@@ -14,6 +14,7 @@ import 'core/widgets/tv_focusable.dart';
 import 'data/controllers/catalog_controller.dart';
 import 'data/repositories/media_repository.dart';
 import 'data/services/cache_store.dart';
+import 'data/services/dead_stream_store.dart';
 import 'data/services/elo_api_service.dart';
 import 'data/services/favorites_store.dart';
 import 'data/services/iptv_org_service.dart';
@@ -56,6 +57,9 @@ Future<void> main() async {
   final favorites = FavoritesStore();
   await favorites.load();
 
+  final deadStreams = DeadStreamStore();
+  await deadStreams.load();
+
   final cache = CacheStore(ttl: Duration(hours: settings.cacheHours));
   await cache.init();
 
@@ -80,6 +84,7 @@ Future<void> main() async {
       settings: settings,
       watchProgress: watchProgress,
       favorites: favorites,
+      deadStreams: deadStreams,
       child: WolfApp(router: buildRouter()),
     ),
   );

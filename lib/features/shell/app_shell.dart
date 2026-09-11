@@ -160,7 +160,7 @@ class WolfTopBar extends StatelessWidget implements PreferredSizeWidget {
       titleSpacing: 20,
       title: Row(
         children: [
-          const WolfLogoMark(size: 22),
+          const WolfLogoMark(size: 28, radius: 5),
           const SizedBox(width: 10),
           Text(title, style: Theme.of(context).textTheme.headlineMedium),
         ],

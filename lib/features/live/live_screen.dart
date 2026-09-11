@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -9,6 +11,8 @@ import '../../core/widgets/category_bar.dart';
 import '../../core/widgets/scan_line.dart';
 import '../../core/widgets/tv_focusable.dart';
 import '../../data/models/media_item.dart';
+import '../../data/services/dead_stream_store.dart';
+import '../../data/services/stream_health_service.dart';
 import '../shell/app_shell.dart';
 
 class LiveScreen extends StatefulWidget {
@@ -19,6 +23,8 @@ class LiveScreen extends StatefulWidget {
 }
 
 class _LiveScreenState extends State<LiveScreen> {
+  /// Full catalog after known-dead filter (pre health-sweep removals applied via listener).
+  List<LiveChannel> _catalog = const [];
   List<LiveChannel> _all = const [];
   List<String> _cats = const ['All'];
   List<String> _countries = const ['All'];
@@ -28,12 +34,21 @@ class _LiveScreenState extends State<LiveScreen> {
   String? _error;
   String _query = '';
   final _searchCtrl = TextEditingController();
+  DeadStreamStore? _deadStore;
+  final _health = StreamHealthService();
+  HealthSweepProgress? _healthProgress;
 
   bool _booted = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final dead = AppScope.deadStreamsOf(context);
+    if (!identical(_deadStore, dead)) {
+      _deadStore?.removeListener(_onDeadStreamsChanged);
+      _deadStore = dead;
+      _deadStore!.addListener(_onDeadStreamsChanged);
+    }
     if (_booted) return;
     _booted = true;
     _load();
@@ -41,43 +56,68 @@ class _LiveScreenState extends State<LiveScreen> {
 
   @override
   void dispose() {
+    _health.cancel();
+    _deadStore?.removeListener(_onDeadStreamsChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  void _applyChannelMeta(List<LiveChannel> channels) {
+    final cats = {
+      for (final c in channels) c.category,
+    }.toList()
+      ..sort((a, b) {
+        if (a.toLowerCase() == 'sports') return -1;
+        if (b.toLowerCase() == 'sports') return 1;
+        return a.compareTo(b);
+      });
+    final countries = {
+      for (final c in channels)
+        if (c.countryName != null && c.countryName!.isNotEmpty) c.countryName!,
+    }.toList()
+      ..sort();
+    _all = channels;
+    _cats = ['All', ...cats];
+    _countries = ['All', ...countries];
+    if (_selectedCat >= _cats.length) _selectedCat = 0;
+    if (_selectedCountry >= _countries.length) _selectedCountry = 0;
+  }
+
+  void _refreshFromCatalog() {
+    final dead = AppScope.deadStreamsOf(context);
+    _applyChannelMeta(dead.filterChannels(_catalog));
+  }
+
+  void _onDeadStreamsChanged() {
+    if (!mounted || _loading) return;
+    setState(_refreshFromCatalog);
+  }
+
   Future<void> _load({bool forceRefresh = false}) async {
+    _health.cancel();
     setState(() {
       _loading = true;
       _error = null;
+      _healthProgress = null;
     });
     try {
+      final dead = AppScope.deadStreamsOf(context);
       final channels = await AppScope.repoOf(context)
           .liveChannels(forceRefresh: forceRefresh);
       if (!mounted) return;
-      final cats = {
-        for (final c in channels) c.category,
-      }.toList()
-        ..sort((a, b) {
-          if (a.toLowerCase() == 'sports') return -1;
-          if (b.toLowerCase() == 'sports') return 1;
-          return a.compareTo(b);
-        });
-      final countries = {
-        for (final c in channels)
-          if (c.countryName != null && c.countryName!.isNotEmpty) c.countryName!,
-      }.toList()
-        ..sort();
+      _catalog = channels;
       setState(() {
-        _all = channels;
-        _cats = ['All', ...cats];
-        _countries = ['All', ...countries];
         _selectedCat = 0;
         _selectedCountry = 0;
+        _applyChannelMeta(dead.filterChannels(channels));
         _loading = false;
       });
+      // Probe in background — hide dead URLs without waiting to open each one.
+      unawaited(_runHealthSweep());
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _catalog = const [];
         _all = const [];
         _cats = const ['All'];
         _countries = const ['All'];
@@ -85,6 +125,32 @@ class _LiveScreenState extends State<LiveScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _runHealthSweep() async {
+    final dead = AppScope.deadStreamsOf(context);
+    await _health.sweep(
+      channels: _catalog,
+      dead: dead,
+      onProgress: (p) {
+        if (!mounted) return;
+        setState(() => _healthProgress = p);
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _refreshFromCatalog();
+      final p = _healthProgress;
+      if (p != null) {
+        _healthProgress = HealthSweepProgress(
+          checked: p.checked,
+          total: p.total,
+          markedDead: p.markedDead,
+          keptAlive: p.keptAlive,
+          running: false,
+        );
+      }
+    });
   }
 
   List<LiveChannel> get _filtered {
@@ -164,6 +230,37 @@ class _LiveScreenState extends State<LiveScreen> {
     );
   }
 
+  Widget _buildHealthBanner() {
+    final p = _healthProgress;
+    if (p == null || p.total <= 0) return const SizedBox.shrink();
+    final label = p.running
+        ? 'Checking streams ${p.checked}/${p.total} · removed ${p.markedDead}'
+        : 'Verified · removed ${p.markedDead} dead';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRect(
+            child: LinearProgressIndicator(
+              value: p.running ? p.fraction : 1,
+              minHeight: 2,
+              color: WolfColors.lime,
+              backgroundColor: WolfColors.steel,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: WolfColors.mist,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBody(int sportsCount) {
     if (_loading) {
       return const Center(
@@ -233,6 +330,7 @@ class _LiveScreenState extends State<LiveScreen> {
             ),
           ),
         ),
+        _buildHealthBanner(),
         CategoryBar(
           labels: _cats,
           selected: _selectedCat,
@@ -282,25 +380,32 @@ class _LiveScreenState extends State<LiveScreen> {
                     style: TextStyle(color: WolfColors.mist),
                   ),
                 )
-              : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.28,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                  ),
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final ch = items[i];
-                    return _LiveTile(
-                      channel: ch,
-                      index: i,
-                      onTap: () => _openChannel(ch),
-                    )
-                        .animate(delay: (30 * (i % 20)).ms)
-                        .fadeIn()
-                        .slideY(begin: 0.06);
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final w = constraints.maxWidth;
+                    // Compact tiles: ~168–200px wide on phone/desktop.
+                    final cross = (w / 168).floor().clamp(2, 6);
+                    return GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: cross,
+                        // Wide, short cards (not tall squares).
+                        childAspectRatio: 2.55,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                      ),
+                      itemCount: items.length,
+                      itemBuilder: (context, i) {
+                        final ch = items[i];
+                        return _LiveTile(
+                          channel: ch,
+                          index: i,
+                          onTap: () => _openChannel(ch),
+                        )
+                            .animate(delay: (20 * (i % 24)).ms)
+                            .fadeIn(duration: 180.ms);
+                      },
+                    );
                   },
                 ),
         ),
@@ -487,86 +592,64 @@ class _LiveTile extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               border: Border.all(
-                color: isSports ? WolfColors.ember.withValues(alpha: 0.55) : WolfColors.steel,
+                color: isSports
+                    ? WolfColors.ember.withValues(alpha: 0.55)
+                    : WolfColors.steel,
               ),
             ),
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    _ChannelLogo(url: channel.logoUrl, size: 36),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                _ChannelLogo(url: channel.logoUrl, size: 40),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        channel.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 7,
-                                height: 7,
-                                color: channel.isLive
-                                    ? WolfColors.ember
-                                    : WolfColors.mist,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                channel.isLive ? 'LIVE' : 'OFF',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelSmall
-                                    ?.copyWith(
-                                      color: channel.isLive
-                                          ? WolfColors.ember
-                                          : WolfColors.mist,
-                                    ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                channel.category.toUpperCase(),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelSmall
-                                    ?.copyWith(
-                                      color: isSports
-                                          ? WolfColors.ember
-                                          : WolfColors.mist,
-                                    ),
-                              ),
-                            ],
+                          Container(
+                            width: 6,
+                            height: 6,
+                            color: channel.isLive
+                                ? WolfColors.ember
+                                : WolfColors.mist,
                           ),
-                          if (channel.quality != null &&
-                              channel.quality!.isNotEmpty)
-                            Text(
-                              channel.quality!,
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              [
+                                channel.category,
+                                if (channel.countryCode != null)
+                                  channel.countryCode!,
+                                if (channel.quality != null &&
+                                    channel.quality!.isNotEmpty)
+                                  channel.quality!,
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: Theme.of(context)
                                   .textTheme
                                   .labelSmall
-                                  ?.copyWith(color: WolfColors.lime),
+                                  ?.copyWith(
+                                    color: isSports
+                                        ? WolfColors.ember
+                                        : WolfColors.mist,
+                                  ),
                             ),
+                          ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  channel.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  channel.subtitle ??
-                      'CH ${(index + 1).toString().padLeft(3, '0')}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: WolfColors.mist,
-                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

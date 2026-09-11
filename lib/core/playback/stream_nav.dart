@@ -88,23 +88,39 @@ void openLiveStreamPlayer(
   BuildContext context, {
   required LiveChannel channel,
 }) {
-  final sources = channel.selectableSources;
+  final dead = AppScope.deadStreamsOf(context);
+  final living = dead.livingChannel(channel);
+  if (living == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: WolfColors.steel,
+        content: Text(
+          'This channel’s streams are marked dead. Try again later.',
+          style: TextStyle(color: WolfColors.bone),
+        ),
+      ),
+    );
+    return;
+  }
+
+  final sources = living.selectableSources;
   final primary = sources.isNotEmpty
       ? sources.first
       : LiveStreamSource(
-          url: channel.streamUrl ?? '',
-          quality: channel.quality,
-          userAgent: channel.userAgent,
-          referrer: channel.referrer,
+          url: living.streamUrl ?? '',
+          quality: living.quality,
+          userAgent: living.userAgent,
+          referrer: living.referrer,
         );
 
   context.push('/stream', extra: {
-    'title': channel.name,
+    'title': living.name,
     'url': primary.url,
     'mode': 'live',
     'provider': 'live',
-    'userAgent': primary.userAgent ?? channel.userAgent,
-    'referrer': primary.referrer ?? channel.referrer,
+    'channelId': living.id,
+    'userAgent': primary.userAgent ?? living.userAgent,
+    'referrer': primary.referrer ?? living.referrer,
     'sources': [for (final s in sources) s.toJson()],
     'sourceIndex': 0,
   });

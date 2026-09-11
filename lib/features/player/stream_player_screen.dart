@@ -24,6 +24,7 @@ class StreamPlayerScreen extends StatefulWidget {
     this.provider = 'live',
     this.kind,
     this.mediaId,
+    this.channelId,
     this.season = 1,
     this.episode = 1,
     this.sources = const [],
@@ -39,6 +40,7 @@ class StreamPlayerScreen extends StatefulWidget {
   final String provider;
   final String? kind;
   final String? mediaId;
+  final String? channelId;
   final int season;
   final int episode;
   final List<LiveStreamSource> sources;
@@ -71,6 +73,7 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> {
   String? _error;
   var _webKey = 0;
   final _triedSources = <int>{};
+  var _handlingFailure = false;
 
   var _chromeVisible = true;
   var _fitIndex = 0;
@@ -268,22 +271,92 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> {
   }
 
   Future<void> _onPrimaryFailure(String message) async {
+    if (_handlingFailure) return;
+    _handlingFailure = true;
+    final dead =
+        widget.mode == 'live' ? AppScope.deadStreamsOf(context) : null;
+    try {
+      if (dead != null && _activeUrl.isNotEmpty) {
+        await dead.markUrlDead(_activeUrl);
+      }
+
+      for (var i = 0; i < _sources.length; i++) {
+        if (_triedSources.contains(i)) continue;
+        _triedSources.add(i);
+        if (!mounted) return;
+        setState(() => _sourceIndex = i);
+        await _switchPlayback(
+          url: _sources[i].url,
+          userAgent: _sources[i].userAgent ?? widget.userAgent,
+          referrer: _sources[i].referrer ?? widget.referrer,
+        );
+        return;
+      }
+
+      if (dead != null) {
+        for (final i in _triedSources) {
+          if (i >= 0 && i < _sources.length) {
+            await dead.markUrlDead(_sources[i].url);
+          }
+        }
+        final channelId = widget.channelId;
+        if (channelId != null && channelId.isNotEmpty) {
+          await dead.markChannelDead(channelId);
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _chromeVisible = true;
+        _error = _friendlyError(message);
+      });
+    } finally {
+      _handlingFailure = false;
+    }
+  }
+
+  /// Turn raw media_kit / DNS errors into something users can act on.
+  String _friendlyError(String raw) {
+    final m = raw.toLowerCase();
+    if (m.contains('failed to resolve hostname') ||
+        m.contains('nodename nor servname') ||
+        m.contains('name or service not known') ||
+        m.contains('temporary failure in name resolution')) {
+      return 'This stream host is offline or unreachable.\n'
+          'Try another source, or go back and pick a different channel.';
+    }
+    if (m.contains('connection refused') ||
+        m.contains('timed out') ||
+        m.contains('network is unreachable') ||
+        m.contains('connection reset')) {
+      return 'Could not connect to this stream.\n'
+          'Check your network, then retry or try another source.';
+    }
+    if (m.contains('404') || m.contains('403') || m.contains('410')) {
+      return 'This stream link is dead or blocked.\n'
+          'Try another source or a different channel.';
+    }
+    // Strip noisy "tcp: " prefix from media_kit.
+    final cleaned = raw.replaceFirst(RegExp(r'^tcp:\s*', caseSensitive: false), '');
+    if (cleaned.length > 160) {
+      return '${cleaned.substring(0, 157)}…';
+    }
+    return cleaned.isEmpty ? 'Playback failed' : cleaned;
+  }
+
+  Future<void> _goBack() async {
+    if (!mounted) return;
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _tryNextSource() async {
     for (var i = 0; i < _sources.length; i++) {
-      if (_triedSources.contains(i)) continue;
-      _triedSources.add(i);
-      setState(() => _sourceIndex = i);
-      await _switchPlayback(
-        url: _sources[i].url,
-        userAgent: _sources[i].userAgent ?? widget.userAgent,
-        referrer: _sources[i].referrer ?? widget.referrer,
-      );
+      if (i == _sourceIndex) continue;
+      await _selectSource(i);
       return;
     }
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-      _error = message;
-    });
+    await _reload();
   }
 
   Future<void> _startNativeLive() async {
@@ -560,7 +633,12 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> {
     setState(() {
       _error = null;
       _loading = true;
+      _chromeVisible = true;
     });
+    // Allow previously failed mirrors to be tried again.
+    _triedSources
+      ..clear()
+      ..add(_sourceIndex);
     if (_isHls) {
       await _player?.dispose();
       _player = null;
@@ -589,47 +667,50 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      focusNode: _focus,
-      autofocus: true,
-      onKeyEvent: _onKey,
-      child: Scaffold(
-        backgroundColor: WolfColors.voidBlack,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                if (_isHls) {
-                  setState(() => _chromeVisible = !_chromeVisible);
-                  if (_chromeVisible) _armChromeHide();
-                }
-              },
-              onDoubleTapDown: _isHls
-                  ? (d) {
-                      final w = MediaQuery.sizeOf(context).width;
-                      if (d.localPosition.dx < w * 0.4) {
-                        _seekBy(const Duration(seconds: -10));
-                      } else if (d.localPosition.dx > w * 0.6) {
-                        _seekBy(const Duration(seconds: 10));
-                      } else {
-                        _togglePlay();
+    return PopScope(
+      canPop: true,
+      child: Focus(
+        focusNode: _focus,
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: Scaffold(
+          backgroundColor: WolfColors.voidBlack,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (_isHls) {
+                    setState(() => _chromeVisible = !_chromeVisible);
+                    if (_chromeVisible) _armChromeHide();
+                  }
+                },
+                onDoubleTapDown: _isHls
+                    ? (d) {
+                        final w = MediaQuery.sizeOf(context).width;
+                        if (d.localPosition.dx < w * 0.4) {
+                          _seekBy(const Duration(seconds: -10));
+                        } else if (d.localPosition.dx > w * 0.6) {
+                          _seekBy(const Duration(seconds: 10));
+                        } else {
+                          _togglePlay();
+                        }
                       }
-                    }
-                  : null,
-              child: _isHls ? _buildNativeLive() : _buildWebEmbed(),
-            ),
-            if (_error != null) _buildError(),
-            if (_loading)
-              const ColoredBox(
-                color: Color(0xCC070708),
-                child: Center(
-                  child: CircularProgressIndicator(color: WolfColors.lime),
-                ),
+                    : null,
+                child: _isHls ? _buildNativeLive() : _buildWebEmbed(),
               ),
-            if (_chromeVisible) _buildChrome(),
-          ],
+              if (_error != null) _buildError(),
+              if (_loading)
+                const ColoredBox(
+                  color: Color(0xCC070708),
+                  child: Center(
+                    child: CircularProgressIndicator(color: WolfColors.lime),
+                  ),
+                ),
+              if (_chromeVisible && _error == null) _buildChrome(),
+            ],
+          ),
         ),
       ),
     );
@@ -966,28 +1047,82 @@ class _StreamPlayerScreenState extends State<StreamPlayerScreen> {
   }
 
   Widget _buildError() {
+    final hasOtherSources = _sources.length > 1;
     return ColoredBox(
       color: const Color(0xEE070708),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, color: WolfColors.ember, size: 40),
-              const SizedBox(height: 12),
-              Text(
-                _error ?? 'Playback failed',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: WolfColors.bone),
+      child: SafeArea(
+        child: Stack(
+          children: [
+            Align(
+              alignment: Alignment.topLeft,
+              child: IconButton(
+                onPressed: _goBack,
+                icon: const Icon(Icons.arrow_back, color: WolfColors.bone),
+                tooltip: 'Back',
               ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: _reload,
-                child: const Text('RETRY', style: TextStyle(color: WolfColors.lime)),
+            ),
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      color: WolfColors.ember,
+                      size: 40,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _error ?? 'Playback failed',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: WolfColors.bone),
+                    ),
+                    if (hasOtherSources) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Source ${_sourceIndex + 1} of ${_sources.length}',
+                        style: const TextStyle(
+                          color: WolfColors.mist,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        TextButton(
+                          onPressed: _goBack,
+                          child: const Text(
+                            'BACK',
+                            style: TextStyle(color: WolfColors.bone),
+                          ),
+                        ),
+                        if (hasOtherSources)
+                          TextButton(
+                            onPressed: _tryNextSource,
+                            child: const Text(
+                              'NEXT SOURCE',
+                              style: TextStyle(color: WolfColors.lime),
+                            ),
+                          ),
+                        TextButton(
+                          onPressed: _reload,
+                          child: const Text(
+                            'RETRY',
+                            style: TextStyle(color: WolfColors.lime),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

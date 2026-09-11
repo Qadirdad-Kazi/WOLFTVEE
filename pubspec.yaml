@@ -36,6 +36,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/brand/wolf_logo.jpeg
     - assets/
     - .env
     - .env.example

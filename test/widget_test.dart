@@ -7,6 +7,7 @@ import 'package:wolftvee/core/theme/wolf_theme.dart';
 import 'package:wolftvee/data/controllers/catalog_controller.dart';
 import 'package:wolftvee/data/repositories/media_repository.dart';
 import 'package:wolftvee/data/services/elo_api_service.dart';
+import 'package:wolftvee/data/services/dead_stream_store.dart';
 import 'package:wolftvee/data/services/favorites_store.dart';
 import 'package:wolftvee/data/services/settings_store.dart';
 import 'package:wolftvee/data/services/tmdb_service.dart';
@@ -41,6 +42,7 @@ void main() {
         settings: SettingsStore(),
         watchProgress: WatchProgressStore(),
         favorites: FavoritesStore(),
+        deadStreams: DeadStreamStore(),
         child: MaterialApp.router(
           theme: WolfTheme.dark(),
           routerConfig: router,

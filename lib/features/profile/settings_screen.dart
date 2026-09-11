@@ -173,6 +173,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 child: const Text('CLEAR FAVORITES'),
               ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () async {
+                  await AppScope.deadStreamsOf(context).clear();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      backgroundColor: WolfColors.steel,
+                      content: Text(
+                        'Dead streams list cleared — they can show again',
+                        style: TextStyle(color: WolfColors.bone),
+                      ),
+                    ),
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: WolfColors.mist,
+                  side: const BorderSide(color: WolfColors.steel),
+                  shape: const RoundedRectangleBorder(),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('CLEAR DEAD STREAMS'),
+              ),
               const SizedBox(height: 28),
               Text(
                 'Data is cached on device for speed. Refresh runs a hunt sweep '

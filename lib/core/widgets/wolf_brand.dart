@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -71,22 +72,27 @@ class WolfLogoMark extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.asset(
-        WolfBrandAssets.logo,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.high,
-        errorBuilder: (_, _, _) => Container(
+      child: ColoredBox(
+        color: WolfColors.voidBlack,
+        child: Image.asset(
+          WolfBrandAssets.logo,
           width: size,
           height: size,
-          color: WolfColors.voidBlack,
-          alignment: Alignment.center,
-          child: Icon(
-            Icons.pets,
-            size: size * 0.55,
-            color: WolfColors.lime,
-          ),
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+          errorBuilder: (_, error, stack) {
+            debugPrint('WolfLogoMark asset failed: $error');
+            return SizedBox(
+              width: size,
+              height: size,
+              child: Icon(
+                Icons.cruelty_free, // wolf-like fallback, not pets/paw
+                size: size * 0.62,
+                color: WolfColors.lime,
+              ),
+            );
+          },
         ),
       ),
     );

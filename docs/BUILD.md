@@ -39,6 +39,19 @@ WOLFTVEE_OUT=/path/to/folder ./scripts/build_all.sh
 | Windows | `flutter build windows --release` | `build/windows/x64/runner/Release/` |
 | iOS | — | **Not used** |
 
+Prefer `./scripts/build_all.sh macos` — it ad-hoc signs nested **media_kit** frameworks (`Ass.framework`, `Mpv.framework`, …). An unsigned copy crashes at launch on modern macOS:
+
+```text
+Library not loaded: @rpath/Ass.framework/... (missing code signature)
+```
+
+Manual fix if needed:
+
+```bash
+xattr -cr ~/Downloads/WOLFTVEE.app
+codesign --force --deep --sign - ~/Downloads/WOLFTVEE.app
+```
+
 Enable Windows once (if missing):
 
 ```bash

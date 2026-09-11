@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'data/controllers/catalog_controller.dart';
 import 'data/models/media_item.dart';
 import 'data/repositories/media_repository.dart';
+import 'data/services/dead_stream_store.dart';
 import 'data/services/favorites_store.dart';
 import 'data/services/settings_store.dart';
 import 'data/services/watch_progress_store.dart';
@@ -30,6 +31,7 @@ class AppScope extends InheritedWidget {
     required this.settings,
     required this.watchProgress,
     required this.favorites,
+    required this.deadStreams,
     required super.child,
   });
 
@@ -38,6 +40,7 @@ class AppScope extends InheritedWidget {
   final SettingsStore settings;
   final WatchProgressStore watchProgress;
   final FavoritesStore favorites;
+  final DeadStreamStore deadStreams;
 
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
@@ -54,6 +57,8 @@ class AppScope extends InheritedWidget {
       of(context).watchProgress;
   static FavoritesStore favoritesOf(BuildContext context) =>
       of(context).favorites;
+  static DeadStreamStore deadStreamsOf(BuildContext context) =>
+      of(context).deadStreams;
 
   @override
   bool updateShouldNotify(AppScope oldWidget) =>
@@ -61,7 +66,8 @@ class AppScope extends InheritedWidget {
       catalog != oldWidget.catalog ||
       settings != oldWidget.settings ||
       watchProgress != oldWidget.watchProgress ||
-      favorites != oldWidget.favorites;
+      favorites != oldWidget.favorites ||
+      deadStreams != oldWidget.deadStreams;
 }
 
 GoRouter buildRouter() {
@@ -179,6 +185,7 @@ GoRouter buildRouter() {
             provider: (extra['provider'] ?? 'live').toString(),
             kind: extra['kind']?.toString(),
             mediaId: extra['mediaId']?.toString(),
+            channelId: extra['channelId']?.toString(),
             season: (extra['season'] as int?) ?? 1,
             episode: (extra['episode'] as int?) ?? 1,
             sources: sources,
